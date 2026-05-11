@@ -1,0 +1,10 @@
+# Copy to .dev.vars (gitignored) and fill in.
+# Secrets to set in production with: npx wrangler secret put NAME
+
+GITHUB_APP_ID=123456
+GITHUB_APP_INSTALLATION_ID=12345678
+GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
+
+# Local dev overrides for [vars] in wrangler.toml
+ALLOWED_ORIGIN=http://localhost:5173
+ORCID_BASE=https://sandbox.orcid.org

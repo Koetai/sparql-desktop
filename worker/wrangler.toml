@@ -1,0 +1,18 @@
+name = "sparql-desktop-worker"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Non-secret config. Secrets are set with `wrangler secret put`.
+[vars]
+GITHUB_REPO = "koetai/sparql-examples"
+ALLOWED_ORIGIN = "https://koetai.github.io"
+ORCID_BASE = "https://orcid.org"
+YUMMYDATA_CACHE_TTL_SECONDS = "86400"
+DAILY_SUBMISSION_LIMIT = "10"
+
+# Create with: npx wrangler kv namespace create RATE_LIMITS
+# Then paste the returned id below.
+[[kv_namespaces]]
+binding = "RATE_LIMITS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
