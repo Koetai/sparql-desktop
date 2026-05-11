@@ -101,10 +101,18 @@ npx wrangler secret put GITHUB_APP_ID
 npx wrangler secret put GITHUB_APP_INSTALLATION_ID
 # paste the numeric Installation ID
 
-npx wrangler secret put GITHUB_APP_PRIVATE_KEY
-# paste the *entire* contents of the downloaded .pem file
-# including -----BEGIN RSA PRIVATE KEY----- and -----END RSA PRIVATE KEY-----
-# then press Enter and Ctrl+D
+# The private key is multi-line — do NOT paste interactively (wrangler reads
+# line-by-line and mangles PEM content). Pipe the file in instead:
+cat /path/to/downloaded-key.pem | npx wrangler secret put GITHUB_APP_PRIVATE_KEY
+```
+
+> **Alternative for the private key:** the Cloudflare dashboard (Workers & Pages → your worker → Settings → Variables and Secrets → Add → Secret) has a textarea that preserves newlines correctly. Either approach works.
+
+After setting all three, verify:
+
+```bash
+npx wrangler secret list
+# Should list GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY
 ```
 
 Also update `worker/wrangler.toml` `[vars]` section if needed:

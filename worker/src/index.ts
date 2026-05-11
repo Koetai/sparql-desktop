@@ -50,6 +50,9 @@ export default {
       if (url.pathname === '/api/yummydata' && req.method === 'GET') {
         return await handleYummyData(env, cors);
       }
+      if (url.pathname === '/api/auth/orcid' && req.method === 'POST') {
+        return await handleOrcidTokenExchange(req, env, cors);
+      }
       if (url.pathname === '/api/submit' && req.method === 'POST') {
         return await handleSubmit(req, env, cors);
       }
@@ -201,6 +204,56 @@ interface YummyDataRecord {
   alive?: boolean;
   service_description?: boolean;
   rank?: string;
+}
+
+// Server-to-server relay for the ORCID PKCE token exchange. ORCID's
+// /oauth/token endpoint does not support CORS, so the browser cannot POST to
+// it directly — the Worker does it on behalf of the SPA. No client secret is
+// involved: this is a normal public-client PKCE exchange, just shifted off
+// the browser to avoid CORS.
+async function handleOrcidTokenExchange(
+  req: Request,
+  env: Env,
+  cors: HeadersInit,
+): Promise<Response> {
+  const body = (await req.json()) as {
+    code?: string;
+    code_verifier?: string;
+    client_id?: string;
+    redirect_uri?: string;
+  };
+  if (!body.code || !body.code_verifier || !body.client_id || !body.redirect_uri) {
+    return text(
+      'Missing required fields: code, code_verifier, client_id, redirect_uri',
+      400,
+      cors,
+    );
+  }
+
+  const orcidRes = await fetch(`${env.ORCID_BASE}/oauth/token`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+    },
+    body: new URLSearchParams({
+      client_id: body.client_id,
+      grant_type: 'authorization_code',
+      code: body.code,
+      redirect_uri: body.redirect_uri,
+      code_verifier: body.code_verifier,
+    }),
+  });
+  if (!orcidRes.ok) {
+    const errText = await orcidRes.text();
+    return text(
+      `ORCID token exchange failed (${orcidRes.status}): ${errText.slice(0, 500)}`,
+      orcidRes.status,
+      cors,
+    );
+  }
+  const data = (await orcidRes.json()) as Record<string, unknown>;
+  return json(data, cors);
 }
 
 async function handleYummyData(env: Env, cors: HeadersInit): Promise<Response> {

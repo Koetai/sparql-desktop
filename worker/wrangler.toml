@@ -9,10 +9,10 @@ GITHUB_REPO = "koetai/sparql-examples"
 ALLOWED_ORIGIN = "https://koetai.github.io"
 ORCID_BASE = "https://orcid.org"
 YUMMYDATA_CACHE_TTL_SECONDS = "86400"
-DAILY_SUBMISSION_LIMIT = "10"
+DAILY_SUBMISSION_LIMIT = "25"
 
 # Create with: npx wrangler kv namespace create RATE_LIMITS
 # Then paste the returned id below.
 [[kv_namespaces]]
 binding = "RATE_LIMITS"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "9d03993e99da4e95bac1bcda45943c55"

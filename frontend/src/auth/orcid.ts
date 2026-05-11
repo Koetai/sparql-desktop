@@ -8,6 +8,7 @@
 
 const ORCID_BASE = import.meta.env.VITE_ORCID_BASE_URL ?? 'https://orcid.org';
 const CLIENT_ID = import.meta.env.VITE_ORCID_CLIENT_ID as string;
+const WORKER_URL = import.meta.env.VITE_WORKER_URL ?? '';
 const SCOPE = '/authenticate';
 const STORAGE_KEY = 'sparql_desktop_orcid_session';
 const VERIFIER_KEY = 'sparql_desktop_pkce_verifier';
@@ -71,18 +72,16 @@ export async function completeLoginFromCallback(): Promise<OrcidSession | null> 
   if (!savedState || state !== savedState) throw new Error('OAuth state mismatch');
   if (!verifier) throw new Error('Missing PKCE verifier — restart login');
 
-  const res = await fetch(`${ORCID_BASE}/oauth/token`, {
+  // ORCID's /oauth/token has no CORS, so the Worker brokers the exchange.
+  if (!WORKER_URL) throw new Error('VITE_WORKER_URL is not set');
+  const res = await fetch(`${WORKER_URL}/api/auth/orcid`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json',
-    },
-    body: new URLSearchParams({
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
       client_id: CLIENT_ID,
-      grant_type: 'authorization_code',
       code,
-      redirect_uri: redirectUri(),
       code_verifier: verifier,
+      redirect_uri: redirectUri(),
     }),
   });
   if (!res.ok) {
