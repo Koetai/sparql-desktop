@@ -101,18 +101,31 @@ npx wrangler secret put GITHUB_APP_ID
 npx wrangler secret put GITHUB_APP_INSTALLATION_ID
 # paste the numeric Installation ID
 
-# The private key is multi-line — do NOT paste interactively (wrangler reads
-# line-by-line and mangles PEM content). Pipe the file in instead:
-cat /path/to/downloaded-key.pem | npx wrangler secret put GITHUB_APP_PRIVATE_KEY
+npx wrangler secret put ORCID_CLIENT_SECRET
+# paste the client_secret shown next to your client_id at orcid.org/developer-tools
+# (ORCID requires this on the /oauth/token exchange even for "public" API clients)
+
+# IMPORTANT: GitHub downloads the App private key in PKCS#1 format
+# (-----BEGIN RSA PRIVATE KEY-----) but Cloudflare Workers' Web Crypto only
+# accepts PKCS#8 (-----BEGIN PRIVATE KEY-----). Convert it once first:
+openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt \
+  -in /path/to/downloaded-key.pem \
+  -out github-app-key-pkcs8.pem
+
+# Verify: the converted file should start with "-----BEGIN PRIVATE KEY-----"
+# (no "RSA" word). Then upload it. The private key is multi-line — do NOT
+# paste interactively (wrangler reads line-by-line and mangles PEM content).
+# Pipe the file in instead:
+cat github-app-key-pkcs8.pem | npx wrangler secret put GITHUB_APP_PRIVATE_KEY
 ```
 
 > **Alternative for the private key:** the Cloudflare dashboard (Workers & Pages → your worker → Settings → Variables and Secrets → Add → Secret) has a textarea that preserves newlines correctly. Either approach works.
 
-After setting all three, verify:
+After setting all four, verify:
 
 ```bash
 npx wrangler secret list
-# Should list GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY
+# Should list GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY, ORCID_CLIENT_SECRET
 ```
 
 Also update `worker/wrangler.toml` `[vars]` section if needed:

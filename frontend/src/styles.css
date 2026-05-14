@@ -231,6 +231,24 @@ button.chip:hover {
   color: var(--accent-dark);
 }
 
+.affiliation-none-hint {
+  margin-top: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  background: #f5f1e0;
+  border-left: 3px solid #c5a13a;
+  border-radius: 4px;
+  color: #5a4a1c;
+}
+
+.affiliation-none-hint a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.error-inline {
+  color: #9b1c1c;
+}
+
 .test-success {
   color: #056608;
   font-size: 0.85rem;

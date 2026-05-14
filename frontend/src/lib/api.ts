@@ -13,6 +13,32 @@ export interface SubmissionPayload {
   aiModel?: string;
   naturalLanguageDescription?: string;
   originalAiQuery?: string;
+  // `null` or undefined = no affiliation chosen yet (blocks submit);
+  // '__none__' = explicit "None of these";
+  // any other string = stable id of a fetched ORCID affiliation.
+  selectedAffiliationId?: string | null;
+}
+
+export const AFFILIATION_NONE = '__none__';
+
+export interface AffiliationInfo {
+  id: string;
+  current: boolean;
+  name: string;
+  rorUrl?: string;
+  gridId?: string;
+  ringgoldId?: string;
+  source?: string;
+  role?: string;
+  department?: string;
+  startYear?: number;
+  endYear?: number;
+}
+
+export interface AffiliationsResult {
+  orcid: string;
+  current: AffiliationInfo[];
+  past: AffiliationInfo[];
 }
 
 export interface SubmissionResult {
@@ -53,6 +79,20 @@ export interface EndpointsResult {
 // Attempts the Worker first; on any failure (network, non-2xx, parse) returns
 // `null` so the caller can fall back to a static list. We never throw — the
 // picker should always have *something* to show.
+export async function fetchAffiliations(
+  accessToken: string,
+): Promise<AffiliationsResult | null> {
+  try {
+    const res = await fetch(`${WORKER_URL}/api/affiliations`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as AffiliationsResult;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchEndpoints(): Promise<EndpointInfo[] | null> {
   try {
     const res = await fetch(`${WORKER_URL}/api/yummydata`);

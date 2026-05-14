@@ -6,3 +6,5 @@ dist/
 .wrangler/
 .DS_Store
 *.log
+# GitHub App private keys (any PEM, just in case)
+*.pem

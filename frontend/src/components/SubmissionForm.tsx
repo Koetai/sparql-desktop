@@ -4,6 +4,7 @@ import { submitQuery } from '../lib/api';
 import type { OrcidSession } from '../auth/orcid';
 import { YasqeEditor } from './YasqeEditor';
 import { EndpointPicker } from './EndpointPicker';
+import { AffiliationPicker } from './AffiliationPicker';
 import { extractKeywordCandidates } from '../lib/keywords';
 
 const COMMON_MODELS = [
@@ -34,6 +35,8 @@ export function SubmissionForm({ session }: Props) {
   const [endpoint, setEndpoint] = useState(EXAMPLE_ENDPOINT);
   const [query, setQuery] = useState(EXAMPLE_QUERY);
   const [keywordsText, setKeywordsText] = useState('');
+
+  const [affiliationId, setAffiliationId] = useState<string>('');
 
   const [aiSuggested, setAiSuggested] = useState(false);
   const [aiModel, setAiModel] = useState(COMMON_MODELS[2]);
@@ -71,6 +74,7 @@ export function SubmissionForm({ session }: Props) {
     !!title.trim() &&
     !!endpoint.trim() &&
     !!query.trim() &&
+    !!affiliationId &&
     testResult !== null &&
     testResult.rowCount > 0 &&
     !submitting &&
@@ -111,6 +115,7 @@ export function SubmissionForm({ session }: Props) {
         query,
         keywords,
         prefixes,
+        selectedAffiliationId: affiliationId,
         aiSuggested,
         aiModel: aiSuggested ? resolvedModel() : undefined,
         naturalLanguageDescription: aiSuggested
@@ -289,6 +294,15 @@ export function SubmissionForm({ session }: Props) {
         )}
       </div>
 
+      <div className="field">
+        <label htmlFor="affiliation">Affiliation for this submission</label>
+        <AffiliationPicker
+          accessToken={session.accessToken}
+          value={affiliationId}
+          onChange={setAffiliationId}
+        />
+      </div>
+
       <fieldset className="ai-section">
         <legend>
           <label>
@@ -374,9 +388,11 @@ export function SubmissionForm({ session }: Props) {
                 ? 'Query returned 0 rows — adjust until it returns results.'
                 : !title.trim()
                   ? 'Add a title.'
-                  : aiSuggested && !naturalLanguageDescription.trim()
-                    ? 'Add the original natural-language description.'
-                    : ''}
+                  : !affiliationId
+                    ? 'Pick the affiliation for this submission.'
+                    : aiSuggested && !naturalLanguageDescription.trim()
+                      ? 'Add the original natural-language description.'
+                      : ''}
           </p>
         )}
       </div>
