@@ -6,6 +6,7 @@ export interface Env {
   GITHUB_APP_ID: string;
   GITHUB_APP_INSTALLATION_ID: string;
   GITHUB_APP_PRIVATE_KEY: string;
+  ORCID_CLIENT_SECRET: string;
   // Vars
   GITHUB_REPO: string;
   ALLOWED_ORIGIN: string;
@@ -206,11 +207,14 @@ interface YummyDataRecord {
   rank?: string;
 }
 
-// Server-to-server relay for the ORCID PKCE token exchange. ORCID's
-// /oauth/token endpoint does not support CORS, so the browser cannot POST to
-// it directly — the Worker does it on behalf of the SPA. No client secret is
-// involved: this is a normal public-client PKCE exchange, just shifted off
-// the browser to avoid CORS.
+// Server-to-server relay for the ORCID OAuth token exchange. Two reasons it
+// runs in the Worker rather than the browser:
+//   1. ORCID's /oauth/token has no CORS, so the browser can't POST to it.
+//   2. ORCID requires a client_secret on the exchange (yes, even though they
+//      call it a "public" API client). The secret lives as a Cloudflare
+//      secret and never reaches the browser.
+// PKCE (code_verifier) is still used as an additional protection — both the
+// secret and the verifier are sent.
 async function handleOrcidTokenExchange(
   req: Request,
   env: Env,
@@ -229,6 +233,13 @@ async function handleOrcidTokenExchange(
       cors,
     );
   }
+  if (!env.ORCID_CLIENT_SECRET) {
+    return text(
+      'Worker secret ORCID_CLIENT_SECRET is not set — run: wrangler secret put ORCID_CLIENT_SECRET',
+      500,
+      cors,
+    );
+  }
 
   const orcidRes = await fetch(`${env.ORCID_BASE}/oauth/token`, {
     method: 'POST',
@@ -238,6 +249,7 @@ async function handleOrcidTokenExchange(
     },
     body: new URLSearchParams({
       client_id: body.client_id,
+      client_secret: env.ORCID_CLIENT_SECRET,
       grant_type: 'authorization_code',
       code: body.code,
       redirect_uri: body.redirect_uri,
