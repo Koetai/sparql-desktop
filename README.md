@@ -6,33 +6,36 @@ ORCID-gated web app that lets researchers contribute SPARQL examples to
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────┐
-│  GitHub Pages — static JS SPA                   │
-│  (Vite + React + YASGUI + sparqljs)             │
-│                                                 │
-│   • ORCID OAuth (PKCE, public client)           │
-│   • Direct SPARQL queries to endpoints (CORS)   │
-│   • Endpoint catalog from YummyData             │
-└─────────────────────────┬───────────────────────┘
-                          │ POST /api/submit
-                          │ (Bearer: ORCID access token)
-                          ▼
-┌─────────────────────────────────────────────────┐
-│  Cloudflare Worker — single endpoint            │
-│                                                 │
-│   • Verifies ORCID token via userinfo           │
-│   • Rate-limits per ORCID iD (KV)               │
-│   • Signs GitHub App JWT                        │
-│   • Creates issue on koetai/sparql-examples     │
-└─────────────────────────┬───────────────────────┘
-                          │ Octokit
-                          ▼
-              GitHub API → koetai/sparql-examples
+```mermaid
+flowchart TD
+    subgraph Browser["Browser — GitHub Pages"]
+        SPA["Static JS SPA<br/>Vite + React + YASGUI + sparqljs"]
+    end
+
+    subgraph CFW["Cloudflare Worker (holds all secrets)"]
+        Auth["/api/auth/orcid<br/>PKCE token exchange"]
+        Submit["/api/submit<br/>Verify ORCID, rate-limit per iD,<br/>sign GitHub App JWT, create issue"]
+        Yummy["/api/yummydata<br/>Fetch + 24h KV cache"]
+    end
+
+    ORCID["ORCID OAuth"]
+    SPARQL["Selected SPARQL endpoint<br/>(direct from browser, CORS permitting)"]
+    GH["GitHub API<br/>→ koetai/sparql-examples"]
+    YD["yummydata.org"]
+
+    SPA -. "redirect /authorize (PKCE)" .-> ORCID
+    SPA -- "POST code + verifier" --> Auth
+    Auth -- "POST /oauth/token" --> ORCID
+    SPA -- "Bearer ORCID token" --> Submit
+    Submit -- "Octokit + App JWT" --> GH
+    SPA -. "?query=…" .-> SPARQL
+    SPA -- "GET endpoint list" --> Yummy
+    Yummy -- "GET /endpoint.json" --> YD
 ```
 
-The Worker is the only place that holds secrets (GitHub App private key,
-optionally an ORCID client secret if you use a confidential ORCID client).
+Dotted arrows are top-level navigation or direct browser → third-party calls;
+solid arrows are JSON API calls. The Worker is the only place that holds
+secrets — GitHub App private key, KV bindings, allowed-origin config.
 
 ## Repository layout
 
