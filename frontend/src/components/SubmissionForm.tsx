@@ -138,13 +138,20 @@ export function SubmissionForm({ session }: Props) {
     setSubmitError(null);
     setSubmittedUrl(null);
     try {
-      // In request mode (whether finalising as working or asking for help),
-      // the AI provenance is always relevant — the query was LLM-drafted.
-      const aiActive = submitMode === 'request' || aiSuggested;
+      // `mode` is the SOURCE (how the user filled the form); `submitMode` is
+      // the TARGET issue kind. When the form is in request mode, the user's
+      // intent lives in `naturalLanguageDescription` — use it as the issue
+      // description and always capture AI provenance, even when promoting the
+      // LLM draft to a working-query submission.
+      const fromRequest = mode === 'request';
+      const aiActive = fromRequest || aiSuggested;
+      const effectiveDescription = fromRequest
+        ? naturalLanguageDescription.trim()
+        : description.trim();
       const result = await submitQuery(session.accessToken, {
         mode: submitMode,
         title: title.trim(),
-        description: description.trim(),
+        description: effectiveDescription,
         endpoint: endpoint.trim(),
         query,
         keywords,
