@@ -1,8 +1,12 @@
 // Thin client for the Cloudflare Worker.
 
-const WORKER_URL = import.meta.env.VITE_WORKER_URL ?? 'http://localhost:8787';
+export const WORKER_URL =
+  import.meta.env.VITE_WORKER_URL ?? 'http://localhost:8787';
 
 export interface SubmissionPayload {
+  // 'working' (default) = the contributor has a tested query.
+  // 'request' = NL-driven request for an expert to write or fix the query.
+  mode?: 'working' | 'request';
   title: string;
   description: string;
   endpoint: string;

@@ -18,6 +18,10 @@ export interface Env {
 }
 
 interface SubmissionBody {
+  // 'working' (default) = the contributor has a query they tested; lands as
+  // ready-to-merge. 'request' = the contributor describes what they want in
+  // natural language, may include a failed AI attempt; lands as needs-expert.
+  mode?: 'working' | 'request';
   title: string;
   description: string;
   endpoint: string;
@@ -28,9 +32,6 @@ interface SubmissionBody {
   aiModel?: string;
   naturalLanguageDescription?: string;
   originalAiQuery?: string;
-  // Sentinel value for "None of these" — the user explicitly opted out.
-  // Any other non-empty value must match an id from /api/affiliations for
-  // this user; otherwise the Worker rejects the submission.
   selectedAffiliationId?: string | null;
 }
 
@@ -76,6 +77,9 @@ export default {
       }
       if (url.pathname === '/api/affiliations' && req.method === 'GET') {
         return await handleAffiliations(req, env, cors);
+      }
+      if (url.pathname === '/api/sparql-proxy' && req.method === 'POST') {
+        return await handleSparqlProxy(req, env, cors);
       }
       if (url.pathname === '/api/submit' && req.method === 'POST') {
         return await handleSubmit(req, env, cors);
@@ -218,6 +222,65 @@ async function checkAndIncrementRateLimit(orcid: string, env: Env): Promise<void
   await env.RATE_LIMITS.put(key, String(current + 1), { expirationTtl: 86400 * 2 });
 }
 
+// Server-side SPARQL proxy. Lets the browser query endpoints it can't reach
+// directly — HTTP-only endpoints (mixed-content blocked on our HTTPS origin)
+// and endpoints without permissive CORS. ORCID-authenticated to avoid being
+// an open proxy. Forwards the query as POST form-encoded (handles long
+// queries) and relays the SPARQL JSON results back with our CORS headers.
+async function handleSparqlProxy(
+  req: Request,
+  env: Env,
+  cors: HeadersInit,
+): Promise<Response> {
+  const auth = req.headers.get('Authorization');
+  if (!auth?.startsWith('Bearer ')) {
+    return text('Missing ORCID bearer token', 401, cors);
+  }
+  await verifyOrcidToken(auth.slice(7), env);
+
+  const { endpoint, query } = (await req.json()) as {
+    endpoint?: string;
+    query?: string;
+  };
+  if (!endpoint || !query) {
+    return text('Missing endpoint or query', 400, cors);
+  }
+
+  let target: URL;
+  try {
+    target = new URL(endpoint);
+  } catch {
+    return text('Invalid endpoint URL', 400, cors);
+  }
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+    return text('Endpoint must use http or https', 400, cors);
+  }
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(target.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/sparql-results+json',
+      },
+      body: new URLSearchParams({ query }),
+    });
+  } catch (err) {
+    return text(`Could not reach endpoint: ${(err as Error).message}`, 502, cors);
+  }
+
+  const bodyText = await upstream.text();
+  return new Response(bodyText, {
+    status: upstream.ok ? 200 : upstream.status,
+    headers: {
+      ...cors,
+      'Content-Type':
+        upstream.headers.get('Content-Type') ?? 'application/sparql-results+json',
+    },
+  });
+}
+
 async function handleAffiliations(
   req: Request,
   env: Env,
@@ -248,8 +311,25 @@ async function handleSubmit(req: Request, env: Env, cors: HeadersInit): Promise<
   await checkAndIncrementRateLimit(identity.orcid, env);
 
   const body = (await req.json()) as SubmissionBody;
-  if (!body.query || !body.endpoint || !body.title) {
-    return text('Missing required fields: title, endpoint, query', 400, cors);
+  const mode: 'working' | 'request' = body.mode === 'request' ? 'request' : 'working';
+  if (mode === 'working') {
+    if (!body.query || !body.endpoint || !body.title) {
+      return text('Missing required fields: title, endpoint, query', 400, cors);
+    }
+  } else {
+    // request mode — natural-language description is the primary content;
+    // the query may be empty or partial. Endpoint is still required so an
+    // expert knows where the eventual query should run.
+    if (!body.title || !body.endpoint || !body.naturalLanguageDescription?.trim()) {
+      return text(
+        'Missing required fields for a request: title, endpoint, natural-language description',
+        400,
+        cors,
+      );
+    }
+    if (!body.aiModel?.trim()) {
+      return text('Request mode requires the LLM model name', 400, cors);
+    }
   }
 
   // Fetch the contributor's public affiliations so we can validate their
@@ -280,14 +360,19 @@ async function handleSubmit(req: Request, env: Env, cors: HeadersInit): Promise<
     },
   });
 
-  const labels = ['ready-to-merge'];
-  if (body.aiSuggested) labels.push('ai-assisted');
+  const labels: string[] = [];
+  if (mode === 'request') {
+    labels.push('needs-expert', 'ai-assisted');
+  } else {
+    labels.push('ready-to-merge');
+    if (body.aiSuggested) labels.push('ai-assisted');
+  }
 
   const issue = await octokit.issues.create({
     owner,
     repo,
     title: body.title,
-    body: renderIssueBody(body, identity, selectedAffiliation),
+    body: renderIssueBody(body, identity, selectedAffiliation, mode),
     labels,
   });
 
@@ -298,12 +383,23 @@ function renderIssueBody(
   body: SubmissionBody,
   identity: OrcidIdentity,
   affiliation: Affiliation | null,
+  mode: 'working' | 'request',
 ): string {
-  const lines: string[] = [
+  const lines: string[] = [];
+
+  if (mode === 'request') {
+    lines.push(
+      '> ⚠️ This is a **request for an expert** to write or fix the SPARQL query.',
+      '> The contributor described what they want in natural language and (optionally) provides an LLM-generated draft that did not yet work.',
+      '',
+    );
+  }
+
+  lines.push(
     '## Contributor',
     `**ORCID iD:** [${identity.orcid}](https://orcid.org/${identity.orcid})`,
     `**Name:** ${identity.name}`,
-  ];
+  );
 
   if (affiliation) {
     lines.push('', '### Affiliation', renderAffiliationLine(affiliation));
@@ -315,18 +411,46 @@ function renderIssueBody(
     );
   }
 
+  lines.push('', '## Endpoint', body.endpoint);
+
+  if (mode === 'request') {
+    lines.push(
+      '',
+      '## What the contributor wants to ask',
+      body.naturalLanguageDescription || '_(none provided)_',
+    );
+    if (body.aiModel) {
+      lines.push(
+        '',
+        '## LLM tried',
+        `**Model:** ${body.aiModel}`,
+      );
+    }
+    if (body.query?.trim()) {
+      lines.push(
+        '',
+        '### LLM-generated draft (not yet working)',
+        '```sparql',
+        body.query,
+        '```',
+      );
+    } else {
+      lines.push('', '### LLM-generated draft', '_(none — contributor asked for help without an attempt)_');
+    }
+  } else {
+    lines.push(
+      '',
+      '## Description',
+      body.description || '_(none provided)_',
+      '',
+      '## Query',
+      '```sparql',
+      body.query,
+      '```',
+    );
+  }
+
   lines.push(
-    '',
-    '## Endpoint',
-    body.endpoint,
-    '',
-    '## Description',
-    body.description || '_(none provided)_',
-    '',
-    '## Query',
-    '```sparql',
-    body.query,
-    '```',
     '',
     '## Keywords',
     body.keywords.length > 0
@@ -341,7 +465,7 @@ function renderIssueBody(
     }
   }
 
-  if (body.aiSuggested) {
+  if (mode === 'working' && body.aiSuggested) {
     lines.push(
       '',
       '## AI-assisted submission',
