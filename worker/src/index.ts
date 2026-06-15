@@ -1036,13 +1036,12 @@ function parseIssueBody(body: string): Omit<ParsedIssue, 'number' | 'title' | 'h
     if (!out.description) out.description = nlDesc.trim();
   }
 
-  // Extract first sparql code block — covers both "## Query" and request-mode draft
-  const sparqlBlock = body.match(/```sparql\s*\n([\s\S]*?)\n```/);
-  if (sparqlBlock) out.query = sparqlBlock[1];
-
-  // request mode also has an "Original AI suggestion" block (second sparql block)
-  const allBlocks = [...body.matchAll(/```sparql\s*\n([\s\S]*?)\n```/g)];
-  if (allBlocks.length > 1) out.originalAiQuery = allBlocks[1][1];
+  // Extract sparql code blocks — tolerant of CRLF, trailing spaces on the
+  // opening fence, and the closing ``` being followed by anything on its line.
+  const fenceRe = /```sparql[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```/g;
+  const allBlocks = [...body.matchAll(fenceRe)];
+  if (allBlocks[0]) out.query = allBlocks[0][1];
+  if (allBlocks[1]) out.originalAiQuery = allBlocks[1][1];
 
   const keywordsSec = extractSection(body, 'Keywords');
   if (keywordsSec) {

@@ -11,6 +11,7 @@ import {
 import type { OrcidSession } from '../auth/orcid';
 import { YasqeEditor } from './YasqeEditor';
 import { generateTurtle, sanitizeSlug, suggestFolder } from '../lib/turtle';
+import { runQuery, type QueryResult } from '../lib/sparql';
 
 interface Props {
   session: OrcidSession;
@@ -142,11 +143,38 @@ function CuratorDetail({ session, issueNumber, onBack }: DetailProps) {
     path: string;
   } | null>(null);
 
+  // Used to force-remount the YASGUI editor when the loaded query changes
+  // (YasqeEditor is uncontrolled — it only reads defaultQuery once at mount).
+  const [editorKey, setEditorKey] = useState(0);
+
+  const [testResult, setTestResult] = useState<QueryResult | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [rejecting, setRejecting] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
   const [rejected, setRejected] = useState(false);
+
+  function invalidateTest() {
+    setTestResult(null);
+    setTestError(null);
+  }
+
+  async function handleTest() {
+    setTesting(true);
+    setTestError(null);
+    setTestResult(null);
+    try {
+      const r = await runQuery(endpoint, query, session.accessToken);
+      setTestResult(r);
+    } catch (e) {
+      setTestError((e as Error).message);
+    } finally {
+      setTesting(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -168,6 +196,11 @@ function CuratorDetail({ session, issueNumber, onBack }: DetailProps) {
         setKeywordsText(parsed.keywords.join(', '));
         setSlug(sanitizeSlug(parsed.title));
         setFolder(suggestFolder(parsed.endpoint ?? '', folderList));
+        // Force the editor to remount so it picks up parsed.query as its
+        // initial value — without this, an empty initial mount keeps YASGUI's
+        // built-in default and ignores subsequent prop changes.
+        setEditorKey((k) => k + 1);
+        invalidateTest();
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
       } finally {
@@ -355,7 +388,10 @@ function CuratorDetail({ session, issueNumber, onBack }: DetailProps) {
           id="curate-endpoint"
           type="url"
           value={endpoint}
-          onChange={(e) => setEndpoint(e.target.value)}
+          onChange={(e) => {
+            setEndpoint(e.target.value);
+            invalidateTest();
+          }}
           required
         />
       </div>
@@ -421,10 +457,70 @@ function CuratorDetail({ session, issueNumber, onBack }: DetailProps) {
       <div className="field">
         <label>SPARQL query</label>
         <YasqeEditor
+          key={editorKey}
           defaultQuery={query}
           endpoint={endpoint}
-          onChange={setQuery}
+          onChange={(q) => {
+            setQuery(q);
+            invalidateTest();
+          }}
         />
+        <div className="field-actions">
+          <button
+            type="button"
+            className="secondary"
+            disabled={testing || !endpoint.trim() || !query.trim()}
+            onClick={handleTest}
+          >
+            {testing ? 'Testing…' : 'Test query'}
+          </button>
+          {testResult && (
+            <span className="test-success">
+              ✓ {testResult.rowCount}{' '}
+              {testResult.rowCount === 1 ? 'row' : 'rows'} in{' '}
+              {testResult.durationMs} ms
+              {testResult.viaProxy && (
+                <span className="proxy-tag"> · via proxy</span>
+              )}
+            </span>
+          )}
+          {testError && <span className="test-error">{testError}</span>}
+        </div>
+        {testResult && testResult.sample.length > 0 && (
+          <details className="result-preview" open>
+            <summary>
+              Preview ({testResult.sample.length} of {testResult.rowCount})
+            </summary>
+            <table>
+              <thead>
+                <tr>
+                  {testResult.vars.map((v) => (
+                    <th key={v}>?{v}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {testResult.sample.map((row, i) => (
+                  <tr key={i}>
+                    {testResult.vars.map((v) => (
+                      <td key={v}>{row[v]}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        )}
+        {!query.trim() && (
+          <p className="hint">
+            No query parsed from the issue body. Paste the SPARQL into the
+            editor above, or expand the raw issue body below to copy it.
+          </p>
+        )}
+        <details className="result-preview">
+          <summary>Show raw issue body</summary>
+          <pre className="turtle-preview">{issue.rawBody}</pre>
+        </details>
       </div>
 
       <details className="result-preview" open>
