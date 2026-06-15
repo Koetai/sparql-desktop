@@ -7,11 +7,17 @@ import {
   type OrcidSession,
 } from './auth/orcid';
 import { SubmissionForm } from './components/SubmissionForm';
+import { Curator } from './components/Curator';
+import { fetchCuratorMe } from './lib/api';
+
+type View = 'submit' | 'curate';
 
 export function App() {
   const [session, setSession] = useState<OrcidSession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isCurator, setIsCurator] = useState(false);
+  const [view, setView] = useState<View>('submit');
 
   useEffect(() => {
     (async () => {
@@ -25,6 +31,22 @@ export function App() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (!session) {
+      setIsCurator(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const me = await fetchCuratorMe(session.accessToken);
+      if (cancelled) return;
+      setIsCurator(!!me?.isCurator);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
 
   function handleLogin() {
     startLogin().catch((e) => setError((e as Error).message));
@@ -56,6 +78,24 @@ export function App() {
         </h1>
         {session ? (
           <div className="session">
+            {isCurator && (
+              <div className="view-toggle">
+                <button
+                  type="button"
+                  className={view === 'submit' ? 'tab tab-active' : 'tab'}
+                  onClick={() => setView('submit')}
+                >
+                  Submit
+                </button>
+                <button
+                  type="button"
+                  className={view === 'curate' ? 'tab tab-active' : 'tab'}
+                  onClick={() => setView('curate')}
+                >
+                  Curate
+                </button>
+              </div>
+            )}
             <span>
               Signed in as <strong>{session.name}</strong>{' '}
               <span className="orcid-id">{session.orcid}</span>
@@ -65,6 +105,7 @@ export function App() {
               onClick={() => {
                 logout();
                 setSession(null);
+                setView('submit');
               }}
             >
               Sign out
@@ -91,7 +132,11 @@ export function App() {
       {error && <div className="error">{error}</div>}
 
       {session ? (
-        <SubmissionForm session={session} />
+        isCurator && view === 'curate' ? (
+          <Curator session={session} />
+        ) : (
+          <SubmissionForm session={session} />
+        )
       ) : (
         <div className="placeholder">
           <h2>Contribute SPARQL examples to koetai/sparql-examples</h2>

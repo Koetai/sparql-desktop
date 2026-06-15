@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/auth/orcid.ts","./src/lib/api.ts"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/auth/orcid.ts","./src/components/affiliationpicker.tsx","./src/components/curator.tsx","./src/components/endpointpicker.tsx","./src/components/llmhelper.tsx","./src/components/submissionform.tsx","./src/components/yasqeeditor.tsx","./src/lib/api.ts","./src/lib/endpoints.ts","./src/lib/keywords.ts","./src/lib/sparql.ts","./src/lib/turtle.ts"],"version":"5.9.3"}

@@ -6,10 +6,13 @@ compatibility_flags = ["nodejs_compat"]
 # Non-secret config. Secrets are set with `wrangler secret put`.
 [vars]
 GITHUB_REPO = "koetai/sparql-examples"
+GITHUB_REPO_DEFAULT_BRANCH = "master"
 ALLOWED_ORIGIN = "https://koetai.github.io"
 ORCID_BASE = "https://orcid.org"
 YUMMYDATA_CACHE_TTL_SECONDS = "86400"
 DAILY_SUBMISSION_LIMIT = "25"
+# Comma-separated ORCID iDs allowed to use the curator endpoints. Edit as needed.
+CURATOR_ORCIDS = "0000-0001-9773-4008"
 
 # Create with: npx wrangler kv namespace create RATE_LIMITS
 # Then paste the returned id below.

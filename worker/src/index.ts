@@ -13,6 +13,10 @@ export interface Env {
   ORCID_BASE: string;
   YUMMYDATA_CACHE_TTL_SECONDS: string;
   DAILY_SUBMISSION_LIMIT: string;
+  // Curator allowlist — comma-separated ORCID iDs that may use /api/curator/*.
+  CURATOR_ORCIDS: string;
+  // Default branch of the data repo (e.g., "master").
+  GITHUB_REPO_DEFAULT_BRANCH: string;
   // KV
   RATE_LIMITS: KVNamespace;
 }
@@ -83,6 +87,22 @@ export default {
       }
       if (url.pathname === '/api/submit' && req.method === 'POST') {
         return await handleSubmit(req, env, cors);
+      }
+      if (url.pathname === '/api/curator/me' && req.method === 'GET') {
+        return await handleCuratorMe(req, env, cors);
+      }
+      if (url.pathname === '/api/curator/issues' && req.method === 'GET') {
+        return await handleCuratorIssues(req, env, cors);
+      }
+      const issueMatch = url.pathname.match(/^\/api\/curator\/issues\/(\d+)$/);
+      if (issueMatch && req.method === 'GET') {
+        return await handleCuratorIssue(req, env, cors, parseInt(issueMatch[1], 10));
+      }
+      if (url.pathname === '/api/curator/folders' && req.method === 'GET') {
+        return await handleCuratorFolders(req, env, cors);
+      }
+      if (url.pathname === '/api/curator/publish' && req.method === 'POST') {
+        return await handleCuratorPublish(req, env, cors);
       }
       return text('Not Found', 404, cors);
     } catch (err) {
@@ -606,4 +626,503 @@ async function handleYummyData(env: Env, cors: HeadersInit): Promise<Response> {
   return new Response(payload, {
     headers: { ...cors, 'Content-Type': 'application/json', 'X-Cache': 'MISS' },
   });
+}
+
+// =====================================================================
+// Curator endpoints — for maintainers turning issues into Turtle PRs.
+// Gated by ORCID allowlist (CURATOR_ORCIDS). Match the upstream
+// sib-swiss/sparql-examples schema so output files validate cleanly.
+// =====================================================================
+
+interface ParsedIssue {
+  number: number;
+  title: string;
+  htmlUrl: string;
+  labels: string[];
+  contributorOrcid?: string;
+  contributorName?: string;
+  affiliation?: string;
+  endpoint?: string;
+  description?: string;
+  query?: string;
+  keywords: string[];
+  aiModel?: string;
+  naturalLanguageDescription?: string;
+  originalAiQuery?: string;
+  rawBody: string;
+}
+
+interface PublishRequest {
+  issueNumber: number;
+  folder: string; // e.g., "UniProt" or "idr-muenster"
+  slug: string; // e.g., "list_uniprot_proteins"
+  label: string; // rdfs:label
+  comment: string; // rdfs:comment (HTML allowed)
+  endpoint: string;
+  query: string;
+  keywords: string[];
+  sequenceNumber?: number; // optional file prefix, e.g. "100"
+}
+
+async function requireCurator(
+  req: Request,
+  env: Env,
+): Promise<OrcidIdentity> {
+  const auth = req.headers.get('Authorization');
+  if (!auth?.startsWith('Bearer ')) {
+    throw new HttpError(401, 'Missing ORCID bearer token');
+  }
+  const identity = await verifyOrcidToken(auth.slice(7), env);
+  const allowed = (env.CURATOR_ORCIDS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!allowed.includes(identity.orcid)) {
+    throw new HttpError(
+      403,
+      `ORCID iD ${identity.orcid} is not on the curator allowlist`,
+    );
+  }
+  return identity;
+}
+
+class HttpError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
+}
+
+function buildOctokit(env: Env): Octokit {
+  return new Octokit({
+    authStrategy: createAppAuth,
+    auth: {
+      appId: env.GITHUB_APP_ID,
+      privateKey: env.GITHUB_APP_PRIVATE_KEY,
+      installationId: env.GITHUB_APP_INSTALLATION_ID,
+    },
+  });
+}
+
+async function handleCuratorMe(
+  req: Request,
+  env: Env,
+  cors: HeadersInit,
+): Promise<Response> {
+  try {
+    const me = await requireCurator(req, env);
+    return json({ orcid: me.orcid, name: me.name, isCurator: true }, cors);
+  } catch (e) {
+    if (e instanceof HttpError && e.status === 403) {
+      // 200 with isCurator:false so the frontend can hide curator UI without
+      // a noisy error.
+      const fallback = await verifyOrcidToken(
+        (req.headers.get('Authorization') ?? '').slice(7),
+        env,
+      ).catch(() => null);
+      return json(
+        {
+          orcid: fallback?.orcid ?? null,
+          name: fallback?.name ?? null,
+          isCurator: false,
+        },
+        cors,
+      );
+    }
+    throw e;
+  }
+}
+
+async function handleCuratorIssues(
+  req: Request,
+  env: Env,
+  cors: HeadersInit,
+): Promise<Response> {
+  await requireCurator(req, env);
+  const [owner, repo] = env.GITHUB_REPO.split('/');
+  const octokit = buildOctokit(env);
+  const url = new URL(req.url);
+  const state = (url.searchParams.get('state') ?? 'open') as
+    | 'open'
+    | 'closed'
+    | 'all';
+  const label = url.searchParams.get('label') ?? '';
+  const issues = await octokit.issues.listForRepo({
+    owner,
+    repo,
+    state,
+    labels: label || undefined,
+    per_page: 100,
+  });
+  // Skip PRs (they're issues too) and reduce to the fields the curator UI needs.
+  const list = issues.data
+    .filter((i) => !i.pull_request)
+    .map((i) => ({
+      number: i.number,
+      title: i.title,
+      htmlUrl: i.html_url,
+      state: i.state,
+      labels: (i.labels ?? [])
+        .map((l) => (typeof l === 'string' ? l : l.name))
+        .filter(Boolean),
+      createdAt: i.created_at,
+      updatedAt: i.updated_at,
+      submitter: i.user?.login ?? null,
+    }));
+  return json({ issues: list }, cors);
+}
+
+async function handleCuratorIssue(
+  req: Request,
+  env: Env,
+  cors: HeadersInit,
+  issueNumber: number,
+): Promise<Response> {
+  await requireCurator(req, env);
+  const [owner, repo] = env.GITHUB_REPO.split('/');
+  const octokit = buildOctokit(env);
+  const { data } = await octokit.issues.get({ owner, repo, issue_number: issueNumber });
+  if (data.pull_request) {
+    return text(`#${issueNumber} is a pull request, not an issue`, 404, cors);
+  }
+  const parsed = parseIssueBody(data.body ?? '');
+  const result: ParsedIssue = {
+    ...parsed,
+    number: data.number,
+    title: data.title,
+    htmlUrl: data.html_url,
+    labels: (data.labels ?? [])
+      .map((l) => (typeof l === 'string' ? l : l.name))
+      .filter(Boolean) as string[],
+    rawBody: data.body ?? '',
+  };
+  return json(result, cors);
+}
+
+async function handleCuratorFolders(
+  req: Request,
+  env: Env,
+  cors: HeadersInit,
+): Promise<Response> {
+  await requireCurator(req, env);
+  const [owner, repo] = env.GITHUB_REPO.split('/');
+  const octokit = buildOctokit(env);
+  const { data } = await octokit.repos.getContent({
+    owner,
+    repo,
+    path: 'examples',
+  });
+  if (!Array.isArray(data)) {
+    return json({ folders: [] }, cors);
+  }
+  const folders = data
+    .filter((e) => e.type === 'dir')
+    .map((e) => e.name)
+    .sort((a, b) => a.localeCompare(b));
+  return json({ folders }, cors);
+}
+
+async function handleCuratorPublish(
+  req: Request,
+  env: Env,
+  cors: HeadersInit,
+): Promise<Response> {
+  const curator = await requireCurator(req, env);
+  const body = (await req.json()) as PublishRequest;
+  const errs: string[] = [];
+  if (!body.issueNumber) errs.push('issueNumber');
+  if (!body.folder?.trim()) errs.push('folder');
+  if (!body.slug?.trim()) errs.push('slug');
+  if (!body.label?.trim()) errs.push('label');
+  if (!body.query?.trim()) errs.push('query');
+  if (!body.endpoint?.trim()) errs.push('endpoint');
+  if (errs.length) return text(`Missing: ${errs.join(', ')}`, 400, cors);
+
+  const slug = sanitizeSlug(body.slug);
+  const folder = body.folder.trim().replace(/[^A-Za-z0-9_.-]/g, '');
+  const sequence =
+    typeof body.sequenceNumber === 'number' && body.sequenceNumber > 0
+      ? String(body.sequenceNumber).padStart(3, '0') + '_'
+      : '';
+  const fileName = `${sequence}${slug}.ttl`;
+  const path = `examples/${folder}/${fileName}`;
+  const turtle = generateTurtle({
+    endpoint: body.endpoint.trim(),
+    slug,
+    label: body.label.trim(),
+    comment: body.comment?.trim() ?? '',
+    query: body.query,
+    keywords: body.keywords ?? [],
+  });
+
+  const [owner, repo] = env.GITHUB_REPO.split('/');
+  const octokit = buildOctokit(env);
+  const baseBranch = env.GITHUB_REPO_DEFAULT_BRANCH || 'master';
+  const branchName = `curate/issue-${body.issueNumber}-${slug}`.slice(0, 240);
+
+  // Get base branch SHA
+  let baseSha: string;
+  try {
+    const refRes = await octokit.git.getRef({
+      owner,
+      repo,
+      ref: `heads/${baseBranch}`,
+    });
+    baseSha = refRes.data.object.sha;
+  } catch (e) {
+    return text(
+      `Could not read base branch ${baseBranch}: ${(e as Error).message}`,
+      502,
+      cors,
+    );
+  }
+
+  // Create or reuse the branch
+  try {
+    await octokit.git.createRef({
+      owner,
+      repo,
+      ref: `refs/heads/${branchName}`,
+      sha: baseSha,
+    });
+  } catch (e) {
+    // 422 = branch exists; that's fine, we'll commit on top of it.
+    if (!String((e as Error).message).includes('Reference already exists')) {
+      return text(
+        `Could not create branch ${branchName}: ${(e as Error).message}. The GitHub App may be missing the Contents:write permission.`,
+        502,
+        cors,
+      );
+    }
+  }
+
+  // Get the file SHA if it already exists on that branch (idempotent re-publish)
+  let existingSha: string | undefined;
+  try {
+    const existing = await octokit.repos.getContent({
+      owner,
+      repo,
+      path,
+      ref: branchName,
+    });
+    if (!Array.isArray(existing.data) && 'sha' in existing.data) {
+      existingSha = existing.data.sha;
+    }
+  } catch {
+    /* file doesn't exist yet — fine */
+  }
+
+  // Write the file
+  try {
+    await octokit.repos.createOrUpdateFileContents({
+      owner,
+      repo,
+      path,
+      branch: branchName,
+      message: `Curate: ${body.label.trim()} (from issue #${body.issueNumber})`,
+      content: btoa(unescape(encodeURIComponent(turtle))),
+      sha: existingSha,
+    });
+  } catch (e) {
+    return text(
+      `Could not write file: ${(e as Error).message}. The GitHub App may be missing the Contents:write permission.`,
+      502,
+      cors,
+    );
+  }
+
+  // Open the PR (or find an existing one for this branch)
+  const prTitle = `Curate: ${body.label.trim()} (closes #${body.issueNumber})`;
+  const prBody = [
+    `Closes #${body.issueNumber}.`,
+    '',
+    `Curated by [${curator.name}](https://orcid.org/${curator.orcid}) via sparql-desktop.`,
+    '',
+    `**Target endpoint:** ${body.endpoint}`,
+    `**File:** \`${path}\``,
+  ].join('\n');
+
+  let prUrl: string;
+  let prNumber: number;
+  try {
+    const pr = await octokit.pulls.create({
+      owner,
+      repo,
+      head: branchName,
+      base: baseBranch,
+      title: prTitle,
+      body: prBody,
+    });
+    prUrl = pr.data.html_url;
+    prNumber = pr.data.number;
+  } catch (e) {
+    // 422 = PR already exists for this branch — look it up.
+    const msg = String((e as Error).message);
+    if (msg.includes('A pull request already exists')) {
+      const list = await octokit.pulls.list({
+        owner,
+        repo,
+        head: `${owner}:${branchName}`,
+        state: 'open',
+      });
+      if (list.data.length > 0) {
+        prUrl = list.data[0].html_url;
+        prNumber = list.data[0].number;
+      } else {
+        return text(
+          `PR conflict, but none returned by list: ${msg}. App may be missing Pull requests:write.`,
+          502,
+          cors,
+        );
+      }
+    } else {
+      return text(
+        `Could not open PR: ${msg}. The GitHub App may be missing the Pull requests:write permission.`,
+        502,
+        cors,
+      );
+    }
+  }
+
+  // Comment on the source issue with the PR link (best-effort)
+  try {
+    await octokit.issues.createComment({
+      owner,
+      repo,
+      issue_number: body.issueNumber,
+      body: `Curated as PR #${prNumber}: ${prUrl}. Will auto-close when the PR merges.`,
+    });
+  } catch {
+    /* non-fatal */
+  }
+
+  return json({ prUrl, prNumber, path }, cors);
+}
+
+// ---------------------- Issue body parser ----------------------
+// Parses the structured Markdown the Worker itself writes when creating
+// submission issues. Tolerant of missing sections.
+function parseIssueBody(body: string): Omit<ParsedIssue, 'number' | 'title' | 'htmlUrl' | 'labels' | 'rawBody'> {
+  const out: Omit<ParsedIssue, 'number' | 'title' | 'htmlUrl' | 'labels' | 'rawBody'> = {
+    keywords: [],
+  };
+  if (!body) return out;
+
+  const orcidMatch = body.match(/\*\*ORCID iD:\*\*\s*\[([\d-]+X?)\]/i);
+  if (orcidMatch) out.contributorOrcid = orcidMatch[1];
+
+  const nameMatch = body.match(/\*\*Name:\*\*\s*([^\n]+)/);
+  if (nameMatch) out.contributorName = nameMatch[1].trim();
+
+  const affLine = body.match(/### Affiliation\s*\n+(- [^\n]+)/);
+  if (affLine) out.affiliation = affLine[1].replace(/^- /, '').trim();
+
+  const endpoint = extractSection(body, 'Endpoint');
+  if (endpoint) out.endpoint = endpoint.split('\n')[0].trim();
+
+  const description = extractSection(body, 'Description');
+  if (description && !/^_\(none/.test(description.trim())) {
+    out.description = description.trim();
+  }
+
+  // request-mode equivalent
+  const nlDesc =
+    extractSection(body, 'What the contributor wants to ask') ??
+    extractSection(body, 'Original natural language description');
+  if (nlDesc && !/^_\(none/.test(nlDesc.trim())) {
+    out.naturalLanguageDescription = nlDesc.trim();
+    if (!out.description) out.description = nlDesc.trim();
+  }
+
+  // Extract first sparql code block — covers both "## Query" and request-mode draft
+  const sparqlBlock = body.match(/```sparql\s*\n([\s\S]*?)\n```/);
+  if (sparqlBlock) out.query = sparqlBlock[1];
+
+  // request mode also has an "Original AI suggestion" block (second sparql block)
+  const allBlocks = [...body.matchAll(/```sparql\s*\n([\s\S]*?)\n```/g)];
+  if (allBlocks.length > 1) out.originalAiQuery = allBlocks[1][1];
+
+  const keywordsSec = extractSection(body, 'Keywords');
+  if (keywordsSec) {
+    const tags = [...keywordsSec.matchAll(/`([^`]+)`/g)].map((m) => m[1].trim());
+    if (tags.length > 0) out.keywords = tags;
+  }
+
+  const model = body.match(/\*\*Model used:\*\*\s*([^\n_]+)/);
+  if (model) {
+    const v = model[1].trim();
+    if (v && !v.startsWith('_(')) out.aiModel = v;
+  }
+  const modelAlt = body.match(/\*\*Model:\*\*\s*([^\n_]+)/);
+  if (!out.aiModel && modelAlt) out.aiModel = modelAlt[1].trim();
+
+  return out;
+}
+
+function extractSection(body: string, heading: string): string | undefined {
+  const re = new RegExp(`##+\\s+${escapeRegex(heading)}\\s*\\n([\\s\\S]*?)(?=\\n##+\\s|$)`);
+  const m = body.match(re);
+  return m ? m[1].trim() : undefined;
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// ---------------------- Turtle generator ----------------------
+// Matches the sib-swiss / koetai/sparql-examples schema seen in existing files
+// (e.g., examples/UniProt/100_uniprot_organelles_or_plasmids.ttl).
+function generateTurtle(input: {
+  endpoint: string;
+  slug: string;
+  label: string;
+  comment: string;
+  query: string;
+  keywords: string[];
+}): string {
+  const exBase = exNamespaceFor(input.endpoint);
+  const keywords =
+    input.keywords.length > 0
+      ? input.keywords.map((k) => `"${escapeTtl(k)}"`).join(' , ')
+      : '"example"';
+  const labelTtl = escapeTtl(input.label);
+  const commentTtl = escapeTtl(input.comment || input.label);
+  const query = input.query.replace(/\r\n/g, '\n').trim();
+
+  return `@prefix ex: <${exBase}> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix schema: <https://schema.org/> .
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+
+ex:${input.slug} a sh:SPARQLExecutable,
+        sh:SPARQLSelectExecutable ;
+    rdfs:label "${labelTtl}" ;
+    rdfs:comment "${commentTtl}"^^rdf:HTML ;
+    sh:prefixes _:sparql_examples_prefixes ;
+    sh:select """${query}""" ;
+    schema:keywords ${keywords} ;
+    schema:target <${input.endpoint}> .
+`;
+}
+
+function exNamespaceFor(endpoint: string): string {
+  try {
+    const u = new URL(endpoint);
+    return `${u.protocol}//${u.host}/.well-known/sparql-examples/`;
+  } catch {
+    return 'https://koetai.github.io/sparql-examples/';
+  }
+}
+
+function escapeTtl(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+}
+
+function sanitizeSlug(s: string): string {
+  return s
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 120);
 }

@@ -83,6 +83,130 @@ export interface EndpointsResult {
 // Attempts the Worker first; on any failure (network, non-2xx, parse) returns
 // `null` so the caller can fall back to a static list. We never throw — the
 // picker should always have *something* to show.
+// ---------------- Curator API ----------------
+
+export interface CuratorMe {
+  orcid: string | null;
+  name: string | null;
+  isCurator: boolean;
+}
+
+export interface IssueSummary {
+  number: number;
+  title: string;
+  htmlUrl: string;
+  state: string;
+  labels: string[];
+  createdAt: string;
+  updatedAt: string;
+  submitter: string | null;
+}
+
+export interface ParsedIssue {
+  number: number;
+  title: string;
+  htmlUrl: string;
+  labels: string[];
+  contributorOrcid?: string;
+  contributorName?: string;
+  affiliation?: string;
+  endpoint?: string;
+  description?: string;
+  query?: string;
+  keywords: string[];
+  aiModel?: string;
+  naturalLanguageDescription?: string;
+  originalAiQuery?: string;
+  rawBody: string;
+}
+
+export interface PublishPayload {
+  issueNumber: number;
+  folder: string;
+  slug: string;
+  label: string;
+  comment: string;
+  endpoint: string;
+  query: string;
+  keywords: string[];
+  sequenceNumber?: number;
+}
+
+export interface PublishResult {
+  prUrl: string;
+  prNumber: number;
+  path: string;
+}
+
+export async function fetchCuratorMe(
+  accessToken: string,
+): Promise<CuratorMe | null> {
+  try {
+    const res = await fetch(`${WORKER_URL}/api/curator/me`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as CuratorMe;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchCuratorIssues(
+  accessToken: string,
+  opts: { state?: 'open' | 'closed' | 'all'; label?: string } = {},
+): Promise<IssueSummary[]> {
+  const url = new URL(`${WORKER_URL}/api/curator/issues`);
+  if (opts.state) url.searchParams.set('state', opts.state);
+  if (opts.label) url.searchParams.set('label', opts.label);
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error(`Failed to load issues (${res.status}): ${await res.text()}`);
+  const data = (await res.json()) as { issues: IssueSummary[] };
+  return data.issues;
+}
+
+export async function fetchCuratorIssue(
+  accessToken: string,
+  number: number,
+): Promise<ParsedIssue> {
+  const res = await fetch(`${WORKER_URL}/api/curator/issues/${number}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error(`Failed to load issue #${number}: ${await res.text()}`);
+  return (await res.json()) as ParsedIssue;
+}
+
+export async function fetchCuratorFolders(
+  accessToken: string,
+): Promise<string[]> {
+  const res = await fetch(`${WORKER_URL}/api/curator/folders`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) return [];
+  const data = (await res.json()) as { folders: string[] };
+  return data.folders;
+}
+
+export async function publishCuratedExample(
+  accessToken: string,
+  payload: PublishPayload,
+): Promise<PublishResult> {
+  const res = await fetch(`${WORKER_URL}/api/curator/publish`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`Publish failed (${res.status}): ${await res.text()}`);
+  return (await res.json()) as PublishResult;
+}
+
+// ---------------- Affiliations ----------------
+
 export async function fetchAffiliations(
   accessToken: string,
 ): Promise<AffiliationsResult | null> {
