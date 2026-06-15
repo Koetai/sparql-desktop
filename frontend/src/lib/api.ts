@@ -136,6 +136,9 @@ export interface PublishResult {
   prUrl: string;
   prNumber: number;
   path: string;
+  // true = a PR already existed for this branch; the new commit was pushed
+  // on top of it (re-publish to fix the file). false = freshly opened PR.
+  reused?: boolean;
 }
 
 export async function fetchCuratorMe(

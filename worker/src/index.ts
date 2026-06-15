@@ -946,6 +946,7 @@ async function handleCuratorPublish(
 
   let prUrl: string;
   let prNumber: number;
+  let prWasReused = false;
   try {
     const pr = await octokit.pulls.create({
       owner,
@@ -970,6 +971,7 @@ async function handleCuratorPublish(
       if (list.data.length > 0) {
         prUrl = list.data[0].html_url;
         prNumber = list.data[0].number;
+        prWasReused = true;
       } else {
         return text(
           `PR conflict, but none returned by list: ${msg}. App may be missing Pull requests:write.`,
@@ -986,8 +988,10 @@ async function handleCuratorPublish(
     }
   }
 
-  // Comment on the source issue with the PR link (best-effort)
-  try {
+  // Comment on the source issue with the PR link only on the first publish.
+  // Re-publishes (curator clicking Publish again to fix the file) skip the
+  // comment to avoid spamming the issue thread.
+  if (!prWasReused) try {
     await octokit.issues.createComment({
       owner,
       repo,
@@ -998,7 +1002,7 @@ async function handleCuratorPublish(
     /* non-fatal */
   }
 
-  return json({ prUrl, prNumber, path }, cors);
+  return json({ prUrl, prNumber, path, reused: prWasReused }, cors);
 }
 
 // ---------------------- Issue body parser ----------------------

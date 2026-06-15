@@ -141,6 +141,7 @@ function CuratorDetail({ session, issueNumber, onBack }: DetailProps) {
     prUrl: string;
     prNumber: number;
     path: string;
+    reused?: boolean;
   } | null>(null);
 
   // Used to force-remount the YASGUI editor when the loaded query changes
@@ -297,10 +298,27 @@ function CuratorDetail({ session, issueNumber, onBack }: DetailProps) {
       <div className="curator">
         <button type="button" className="secondary" onClick={onBack}>← Back to list</button>
         <div className="success">
-          <h2>Published</h2>
+          <h2>{publishResult.reused ? 'PR updated' : 'Published'}</h2>
           <p>
-            PR <a href={publishResult.prUrl} target="_blank" rel="noreferrer">#{publishResult.prNumber}</a> opened on
-            koetai/sparql-examples. It will auto-close issue #{issue.number} when merged.
+            {publishResult.reused ? (
+              <>
+                A new commit was pushed to the existing PR{' '}
+                <a href={publishResult.prUrl} target="_blank" rel="noreferrer">
+                  #{publishResult.prNumber}
+                </a>{' '}
+                on koetai/sparql-examples. CI re-runs now; the issue will close
+                when the PR merges.
+              </>
+            ) : (
+              <>
+                PR{' '}
+                <a href={publishResult.prUrl} target="_blank" rel="noreferrer">
+                  #{publishResult.prNumber}
+                </a>{' '}
+                opened on koetai/sparql-examples. It will auto-close issue #
+                {issue.number} when merged.
+              </>
+            )}
           </p>
           <p>File: <code>{publishResult.path}</code></p>
         </div>
