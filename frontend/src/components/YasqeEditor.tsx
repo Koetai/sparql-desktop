@@ -30,8 +30,21 @@ export function YasqeEditor({ defaultQuery, endpoint, onChange }: Props) {
       value: defaultQuery,
       requestConfig: { endpoint },
       showQueryButton: false,
+      // Disable YASGUI's localStorage persistency. Without this, the editor
+      // restores the previously-typed query and fires a `change` event that
+      // overwrites our parent state — so a freshly-loaded issue would show
+      // YASGUI's built-in default instead of the parsed query.
+      persistencyExpire: 0,
     });
     yasqeRef.current = yasqe;
+
+    // Explicit setValue after construction guarantees the desired query
+    // wins over any internal restore path the constructor may take.
+    try {
+      yasqe.setValue(defaultQuery);
+    } catch {
+      /* tolerate API drift across yasgui versions */
+    }
 
     yasqe.on('change', () => {
       onChangeRef.current(yasqe.getValue());
