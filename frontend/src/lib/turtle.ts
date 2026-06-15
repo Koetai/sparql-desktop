@@ -16,13 +16,11 @@ export function generateTurtle(input: {
       : '"example"';
   const labelTtl = escapeTtl(input.label);
   const commentTtl = escapeTtl(input.comment || input.label);
-  // Keep inline PREFIX declarations: each example is fully self-describing.
-  // We deliberately do NOT emit `sh:prefixes _:sparql_examples_prefixes` —
-  // the multi-endpoint set we curate (UniProt, IDR, QLever Wikidata, etc.)
-  // uses too many domain-specific prefixes for a single shared list to cover
-  // them all, and `sh:prefixes` would cause "Multiple prefix declarations"
-  // errors against any prefix that happens to be in both places.
-  const query = input.query.replace(/\r\n/g, '\n').trim();
+  // Keep inline PREFIX declarations (each example self-describes), but
+  // de-duplicate them in the prologue. LLM-generated queries sometimes carry
+  // two stacked PREFIX blocks; RDF4J rejects duplicate declarations with
+  // "Multiple prefix declarations" even when the URIs match.
+  const query = dedupeSparqlPrologue(input.query);
 
   return `@prefix ex: <${exBase}> .
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
@@ -83,6 +81,39 @@ function exNamespaceFor(endpoint: string): string {
 
 function escapeTtl(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+}
+
+// De-duplicates PREFIX declarations in the SPARQL prologue, keeping the
+// first occurrence of each prefix name. Walks line-by-line until the first
+// non-prologue / non-blank / non-comment line, then emits the body verbatim.
+// LLM-generated queries frequently include two stacked prefix blocks; the
+// RDF4J parser rejects duplicates even when they map to identical URIs.
+export function dedupeSparqlPrologue(query: string): string {
+  const lines = query.replace(/\r\n/g, '\n').split('\n');
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const prefixLine = /^\s*prefix\s+(\w*)\s*:\s*<[^>]*>\s*\.?\s*$/i;
+  const baseLine = /^\s*base\s+<[^>]*>\s*\.?\s*$/i;
+  let inPrologue = true;
+  for (const line of lines) {
+    if (inPrologue) {
+      const m = line.match(prefixLine);
+      if (m) {
+        const name = m[1].toLowerCase();
+        if (seen.has(name)) continue;
+        seen.add(name);
+        out.push(line);
+        continue;
+      }
+      if (baseLine.test(line) || line.trim() === '' || line.trim().startsWith('#')) {
+        out.push(line);
+        continue;
+      }
+      inPrologue = false;
+    }
+    out.push(line);
+  }
+  return out.join('\n').trim();
 }
 
 // Drops the SPARQL prologue (PREFIX / BASE lines) from the top of a query.
