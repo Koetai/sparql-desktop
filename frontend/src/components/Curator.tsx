@@ -4,6 +4,7 @@ import {
   fetchCuratorIssue,
   fetchCuratorIssues,
   publishCuratedExample,
+  rejectIssue,
   type IssueSummary,
   type ParsedIssue,
 } from '../lib/api';
@@ -141,6 +142,12 @@ function CuratorDetail({ session, issueNumber, onBack }: DetailProps) {
     path: string;
   } | null>(null);
 
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectError, setRejectError] = useState<string | null>(null);
+  const [rejected, setRejected] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -202,6 +209,20 @@ function CuratorDetail({ session, issueNumber, onBack }: DetailProps) {
     !!query.trim() &&
     !publishing;
 
+  async function handleReject() {
+    if (!issue) return;
+    setRejecting(true);
+    setRejectError(null);
+    try {
+      await rejectIssue(session.accessToken, issue.number, rejectReason.trim());
+      setRejected(true);
+    } catch (e) {
+      setRejectError((e as Error).message);
+    } finally {
+      setRejecting(false);
+    }
+  }
+
   async function handlePublish() {
     if (!issue) return;
     setPublishing(true);
@@ -249,6 +270,21 @@ function CuratorDetail({ session, issueNumber, onBack }: DetailProps) {
             koetai/sparql-examples. It will auto-close issue #{issue.number} when merged.
           </p>
           <p>File: <code>{publishResult.path}</code></p>
+        </div>
+      </div>
+    );
+  }
+
+  if (rejected) {
+    return (
+      <div className="curator">
+        <button type="button" className="secondary" onClick={onBack}>← Back to list</button>
+        <div className="success">
+          <h2>Closed as won't fix</h2>
+          <p>
+            Issue <a href={issue.htmlUrl} target="_blank" rel="noreferrer">#{issue.number}</a> closed
+            with the <code>wontfix</code> label.
+          </p>
         </div>
       </div>
     );
@@ -397,6 +433,7 @@ function CuratorDetail({ session, issueNumber, onBack }: DetailProps) {
       </details>
 
       {publishError && <div className="error">{publishError}</div>}
+      {rejectError && <div className="error">{rejectError}</div>}
 
       <div className="submit-row">
         <button
@@ -410,7 +447,48 @@ function CuratorDetail({ session, issueNumber, onBack }: DetailProps) {
         {!canPublish && !publishing && (
           <p className="hint">Fill folder, slug, label, endpoint, and query to publish.</p>
         )}
+        <button
+          type="button"
+          className="danger"
+          onClick={() => setRejectOpen((v) => !v)}
+          disabled={publishing || rejecting}
+        >
+          Close as 'won't fix'
+        </button>
       </div>
+
+      {rejectOpen && (
+        <div className="reject-panel">
+          <label htmlFor="curate-reject-reason">
+            Reason (optional, posted as a comment on the issue)
+          </label>
+          <textarea
+            id="curate-reject-reason"
+            rows={3}
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            placeholder="e.g. duplicate of #N, off-topic, query unrecoverable"
+          />
+          <div className="reject-actions">
+            <button
+              type="button"
+              className="danger"
+              disabled={rejecting}
+              onClick={handleReject}
+            >
+              {rejecting ? 'Closing…' : `Confirm: close #${issue.number} as won't fix`}
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setRejectOpen(false)}
+              disabled={rejecting}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

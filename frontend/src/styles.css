@@ -509,6 +509,59 @@ button.chip:hover {
   }
 }
 
+button.danger {
+  background: transparent;
+  color: #9b1c1c;
+  border: 1px solid #e5b3b3;
+  padding: 0.55rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button.danger:hover:not(:disabled) {
+  background: #fde8e8;
+  border-color: #c47979;
+}
+
+button.danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.reject-panel {
+  border: 1px solid #e5b3b3;
+  background: #fff7f7;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
+.reject-panel label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #7a2828;
+}
+
+.reject-panel textarea {
+  font-family: inherit;
+  font-size: 0.95rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: white;
+}
+
+.reject-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .turtle-preview {
   font-family: ui-monospace, SFMono-Regular, monospace;
   font-size: 0.78rem;

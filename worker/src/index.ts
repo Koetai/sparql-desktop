@@ -104,6 +104,9 @@ export default {
       if (url.pathname === '/api/curator/publish' && req.method === 'POST') {
         return await handleCuratorPublish(req, env, cors);
       }
+      if (url.pathname === '/api/curator/reject' && req.method === 'POST') {
+        return await handleCuratorReject(req, env, cors);
+      }
       return text('Not Found', 404, cors);
     } catch (err) {
       console.error('Worker error:', err);
@@ -1125,4 +1128,70 @@ function sanitizeSlug(s: string): string {
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .slice(0, 120);
+}
+
+async function handleCuratorReject(
+  req: Request,
+  env: Env,
+  cors: HeadersInit,
+): Promise<Response> {
+  const curator = await requireCurator(req, env);
+  const body = (await req.json()) as { issueNumber?: number; reason?: string };
+  if (!body.issueNumber) {
+    return text('Missing issueNumber', 400, cors);
+  }
+  const reason = (body.reason ?? '').trim();
+  const [owner, repo] = env.GITHUB_REPO.split('/');
+  const octokit = buildOctokit(env);
+
+  const commentLines = [
+    `Closed as **won't fix** by curator [${curator.name}](https://orcid.org/${curator.orcid}) via sparql-desktop.`,
+  ];
+  if (reason) {
+    commentLines.push('', '> ' + reason.split('\n').join('\n> '));
+  }
+  try {
+    await octokit.issues.createComment({
+      owner,
+      repo,
+      issue_number: body.issueNumber,
+      body: commentLines.join('\n'),
+    });
+  } catch (e) {
+    return text(
+      `Could not comment on issue: ${(e as Error).message}`,
+      502,
+      cors,
+    );
+  }
+
+  // Best-effort: add 'wontfix' label. Ignore failure (label may not exist).
+  try {
+    await octokit.issues.addLabels({
+      owner,
+      repo,
+      issue_number: body.issueNumber,
+      labels: ['wontfix'],
+    });
+  } catch {
+    /* non-fatal */
+  }
+
+  try {
+    await octokit.issues.update({
+      owner,
+      repo,
+      issue_number: body.issueNumber,
+      state: 'closed',
+      state_reason: 'not_planned',
+    });
+  } catch (e) {
+    return text(
+      `Could not close issue: ${(e as Error).message}`,
+      502,
+      cors,
+    );
+  }
+
+  return json({ ok: true, issueNumber: body.issueNumber }, cors);
 }

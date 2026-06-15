@@ -189,6 +189,22 @@ export async function fetchCuratorFolders(
   return data.folders;
 }
 
+export async function rejectIssue(
+  accessToken: string,
+  issueNumber: number,
+  reason: string,
+): Promise<void> {
+  const res = await fetch(`${WORKER_URL}/api/curator/reject`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ issueNumber, reason }),
+  });
+  if (!res.ok) throw new Error(`Reject failed (${res.status}): ${await res.text()}`);
+}
+
 export async function publishCuratedExample(
   accessToken: string,
   payload: PublishPayload,
