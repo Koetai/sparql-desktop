@@ -1097,20 +1097,35 @@ function generateTurtle(input: {
   // blocks; RDF4J rejects duplicate declarations.
   const query = dedupeSparqlPrologue(input.query);
 
+  // The SHACL test `testAllServicesAnnotated` requires every `SERVICE <IRI>`
+  // in the query to be reflected as `spex:federatesWith <IRI>`.
+  const services = extractServiceIris(query);
+  const federatesLines = services
+    .map((iri) => `    spex:federatesWith <${iri}> ;\n`)
+    .join('');
+
   return `@prefix ex: <${exBase}> .
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix schema: <https://schema.org/> .
 @prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix spex: <https://purl.expasy.org/sparql-examples/ontology#> .
 
 ex:${input.slug} a sh:SPARQLExecutable,
         sh:SPARQLSelectExecutable ;
     rdfs:label "${labelTtl}" ;
     rdfs:comment "${commentTtl}"^^rdf:HTML ;
-    sh:select """${query}""" ;
+${federatesLines}    sh:select """${query}""" ;
     schema:keywords ${keywords} ;
     schema:target <${input.endpoint}> .
 `;
+}
+
+function extractServiceIris(query: string): string[] {
+  const re = /\bSERVICE\s+(?:SILENT\s+)?<([^>]+)>/gi;
+  const out = new Set<string>();
+  for (const m of query.matchAll(re)) out.add(m[1]);
+  return [...out];
 }
 
 // De-duplicates PREFIX declarations in the SPARQL prologue, keeping the
