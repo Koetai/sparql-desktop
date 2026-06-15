@@ -1088,6 +1088,11 @@ function generateTurtle(input: {
       : '"example"';
   const labelTtl = escapeTtl(input.label);
   const commentTtl = escapeTtl(input.comment || input.label);
+  // Keep inline PREFIX declarations: each example is self-describing. We
+  // deliberately do NOT emit `sh:prefixes _:sparql_examples_prefixes` — the
+  // multi-endpoint corpus we curate uses too many domain-specific prefixes
+  // for one shared list to cover, and combining the two sources triggers
+  // "Multiple prefix declarations" failures on common prefixes (rdfs, etc.).
   const query = input.query.replace(/\r\n/g, '\n').trim();
 
   return `@prefix ex: <${exBase}> .
@@ -1100,11 +1105,27 @@ ex:${input.slug} a sh:SPARQLExecutable,
         sh:SPARQLSelectExecutable ;
     rdfs:label "${labelTtl}" ;
     rdfs:comment "${commentTtl}"^^rdf:HTML ;
-    sh:prefixes _:sparql_examples_prefixes ;
     sh:select """${query}""" ;
     schema:keywords ${keywords} ;
     schema:target <${input.endpoint}> .
 `;
+}
+
+// Drops the SPARQL prologue (PREFIX / BASE) from a query string.
+// Mirrors frontend/src/lib/turtle.ts — keep them in sync.
+function stripSparqlPrologue(query: string): string {
+  const lines = query.replace(/\r\n/g, '\n').split('\n');
+  let i = 0;
+  const prologueLine = /^\s*(?:prefix\s+\w*:\s*<[^>]*>|base\s+<[^>]*>)\s*\.?\s*$/i;
+  while (i < lines.length) {
+    const t = lines[i].trim();
+    if (t === '' || t.startsWith('#') || prologueLine.test(lines[i])) {
+      i++;
+      continue;
+    }
+    break;
+  }
+  return lines.slice(i).join('\n').trim();
 }
 
 function exNamespaceFor(endpoint: string): string {

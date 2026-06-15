@@ -16,6 +16,12 @@ export function generateTurtle(input: {
       : '"example"';
   const labelTtl = escapeTtl(input.label);
   const commentTtl = escapeTtl(input.comment || input.label);
+  // Keep inline PREFIX declarations: each example is fully self-describing.
+  // We deliberately do NOT emit `sh:prefixes _:sparql_examples_prefixes` —
+  // the multi-endpoint set we curate (UniProt, IDR, QLever Wikidata, etc.)
+  // uses too many domain-specific prefixes for a single shared list to cover
+  // them all, and `sh:prefixes` would cause "Multiple prefix declarations"
+  // errors against any prefix that happens to be in both places.
   const query = input.query.replace(/\r\n/g, '\n').trim();
 
   return `@prefix ex: <${exBase}> .
@@ -28,7 +34,6 @@ ex:${input.slug} a sh:SPARQLExecutable,
         sh:SPARQLSelectExecutable ;
     rdfs:label "${labelTtl}" ;
     rdfs:comment "${commentTtl}"^^rdf:HTML ;
-    sh:prefixes _:sparql_examples_prefixes ;
     sh:select """${query}""" ;
     schema:keywords ${keywords} ;
     schema:target <${input.endpoint}> .
@@ -78,4 +83,23 @@ function exNamespaceFor(endpoint: string): string {
 
 function escapeTtl(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+}
+
+// Drops the SPARQL prologue (PREFIX / BASE lines) from the top of a query.
+// The grammar requires the prologue to come first, so we walk from the top
+// skipping blanks, comments, and prologue lines; once we hit a non-prologue
+// non-blank non-comment line, the rest is the body.
+export function stripSparqlPrologue(query: string): string {
+  const lines = query.replace(/\r\n/g, '\n').split('\n');
+  let i = 0;
+  const prologueLine = /^\s*(?:prefix\s+\w*:\s*<[^>]*>|base\s+<[^>]*>)\s*\.?\s*$/i;
+  while (i < lines.length) {
+    const t = lines[i].trim();
+    if (t === '' || t.startsWith('#') || prologueLine.test(lines[i])) {
+      i++;
+      continue;
+    }
+    break;
+  }
+  return lines.slice(i).join('\n').trim();
 }
