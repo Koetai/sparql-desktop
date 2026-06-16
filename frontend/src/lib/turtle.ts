@@ -3,6 +3,7 @@
 
 export function generateTurtle(input: {
   endpoint: string;
+  additionalEndpoints?: string[];
   slug: string;
   label: string;
   comment: string;
@@ -43,8 +44,20 @@ ex:${input.slug} a sh:SPARQLExecutable,
     rdfs:comment "${commentTtl}"^^rdf:HTML ;
 ${federatesLines}    sh:select """${query}""" ;
     schema:keywords ${keywords} ;
-    schema:target <${input.endpoint}> .
+    schema:target ${targets(input.endpoint, input.additionalEndpoints).join(' , ')} .
 `;
+}
+
+function targets(primary: string, extras?: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const url of [primary, ...(extras ?? [])]) {
+    const u = url.trim();
+    if (!u || seen.has(u)) continue;
+    seen.add(u);
+    out.push(`<${u}>`);
+  }
+  return out;
 }
 
 // Extracts the distinct full IRIs referenced by `SERVICE <IRI>` in a SPARQL

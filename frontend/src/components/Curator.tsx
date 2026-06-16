@@ -131,6 +131,8 @@ function CuratorDetail({ session, issueNumber, onBack }: DetailProps) {
   const [label, setLabel] = useState('');
   const [comment, setComment] = useState('');
   const [endpoint, setEndpoint] = useState('');
+  const [additionalEndpoints, setAdditionalEndpoints] = useState<string[]>([]);
+  const [pendingExtraEndpoint, setPendingExtraEndpoint] = useState('');
   const [query, setQuery] = useState('');
   const [keywordsText, setKeywordsText] = useState('');
   const [sequenceNumber, setSequenceNumber] = useState<number | ''>('');
@@ -193,6 +195,8 @@ function CuratorDetail({ session, issueNumber, onBack }: DetailProps) {
         setLabel(parsed.title);
         setComment(parsed.description ?? '');
         setEndpoint(parsed.endpoint ?? '');
+        setAdditionalEndpoints(parsed.additionalEndpoints ?? []);
+        setPendingExtraEndpoint('');
         setQuery(parsed.query ?? '');
         setKeywordsText(parsed.keywords.join(', '));
         setSlug(sanitizeSlug(parsed.title));
@@ -270,6 +274,9 @@ function CuratorDetail({ session, issueNumber, onBack }: DetailProps) {
         label: label.trim(),
         comment: comment.trim(),
         endpoint: endpoint.trim(),
+        additionalEndpoints: additionalEndpoints
+          .map((e) => e.trim())
+          .filter(Boolean),
         query,
         keywords,
         sequenceNumber: typeof sequenceNumber === 'number' ? sequenceNumber : undefined,
@@ -401,7 +408,7 @@ function CuratorDetail({ session, issueNumber, onBack }: DetailProps) {
       </div>
 
       <div className="field">
-        <label htmlFor="curate-endpoint">Target endpoint</label>
+        <label htmlFor="curate-endpoint">Target endpoint (primary)</label>
         <input
           id="curate-endpoint"
           type="url"
@@ -412,6 +419,62 @@ function CuratorDetail({ session, issueNumber, onBack }: DetailProps) {
           }}
           required
         />
+        <p className="hint">
+          Used for the Test query gate. Becomes the first <code>schema:target</code> in the
+          published .ttl.
+        </p>
+      </div>
+
+      <div className="field">
+        <label htmlFor="curate-extra-endpoint">
+          Also runs on (additional <code>schema:target</code> values)
+        </label>
+        {additionalEndpoints.length > 0 && (
+          <ul className="endpoint-chips">
+            {additionalEndpoints.map((url) => (
+              <li key={url} className="endpoint-chip">
+                <code>{url}</code>
+                <button
+                  type="button"
+                  className="chip-remove"
+                  aria-label={`Remove ${url}`}
+                  onClick={() =>
+                    setAdditionalEndpoints((cur) =>
+                      cur.filter((u) => u !== url),
+                    )
+                  }
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="add-endpoint-row">
+          <input
+            id="curate-extra-endpoint"
+            type="url"
+            value={pendingExtraEndpoint}
+            onChange={(e) => setPendingExtraEndpoint(e.target.value)}
+            placeholder="https://other.endpoint/sparql"
+          />
+          <button
+            type="button"
+            className="secondary"
+            disabled={
+              !pendingExtraEndpoint.trim() ||
+              pendingExtraEndpoint.trim() === endpoint ||
+              additionalEndpoints.includes(pendingExtraEndpoint.trim())
+            }
+            onClick={() => {
+              const next = pendingExtraEndpoint.trim();
+              setAdditionalEndpoints((cur) => [...cur, next]);
+              setPendingExtraEndpoint('');
+            }}
+          >
+            Add
+          </button>
+        </div>
       </div>
 
       <div className="curate-row">

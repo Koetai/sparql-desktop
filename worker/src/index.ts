@@ -29,6 +29,10 @@ interface SubmissionBody {
   title: string;
   description: string;
   endpoint: string;
+  // Extra endpoints the query is also valid against. Rendered into the issue
+  // body and emitted as additional schema:target IRIs when the curator
+  // publishes the example.
+  additionalEndpoints?: string[];
   query: string;
   keywords: string[];
   prefixes: Record<string, string>;
@@ -434,7 +438,15 @@ function renderIssueBody(
     );
   }
 
-  lines.push('', '## Endpoint', body.endpoint);
+  const allEndpoints = [
+    body.endpoint,
+    ...(body.additionalEndpoints ?? []).map((s) => s.trim()).filter(Boolean),
+  ];
+  if (allEndpoints.length > 1) {
+    lines.push('', '## Endpoints', ...allEndpoints.map((e) => `- ${e}`));
+  } else {
+    lines.push('', '## Endpoint', body.endpoint);
+  }
 
   if (mode === 'request') {
     lines.push(
@@ -646,6 +658,7 @@ interface ParsedIssue {
   contributorName?: string;
   affiliation?: string;
   endpoint?: string;
+  additionalEndpoints?: string[];
   description?: string;
   query?: string;
   keywords: string[];
@@ -662,6 +675,7 @@ interface PublishRequest {
   label: string; // rdfs:label
   comment: string; // rdfs:comment (HTML allowed)
   endpoint: string;
+  additionalEndpoints?: string[];
   query: string;
   keywords: string[];
   sequenceNumber?: number; // optional file prefix, e.g. "100"
@@ -850,6 +864,9 @@ async function handleCuratorPublish(
   const path = `examples/${folder}/${fileName}`;
   const turtle = generateTurtle({
     endpoint: body.endpoint.trim(),
+    additionalEndpoints: (body.additionalEndpoints ?? [])
+      .map((e) => e.trim())
+      .filter(Boolean),
     slug,
     label: body.label.trim(),
     comment: body.comment?.trim() ?? '',
@@ -1023,8 +1040,21 @@ function parseIssueBody(body: string): Omit<ParsedIssue, 'number' | 'title' | 'h
   const affLine = body.match(/### Affiliation\s*\n+(- [^\n]+)/);
   if (affLine) out.affiliation = affLine[1].replace(/^- /, '').trim();
 
-  const endpoint = extractSection(body, 'Endpoint');
-  if (endpoint) out.endpoint = endpoint.split('\n')[0].trim();
+  // Handles both legacy single-line `## Endpoint\n<url>` and the new
+  // `## Endpoints\n- <url1>\n- <url2>` bulleted form.
+  const endpointSection =
+    extractSection(body, 'Endpoints') ?? extractSection(body, 'Endpoint');
+  if (endpointSection) {
+    const urls = endpointSection
+      .split('\n')
+      .map((l) => l.trim())
+      .map((l) => l.replace(/^-\s+/, ''))
+      .filter((l) => /^https?:\/\//i.test(l));
+    if (urls.length > 0) {
+      out.endpoint = urls[0];
+      if (urls.length > 1) out.additionalEndpoints = urls.slice(1);
+    }
+  }
 
   const description = extractSection(body, 'Description');
   if (description && !/^_\(none/.test(description.trim())) {
@@ -1079,6 +1109,7 @@ function escapeRegex(s: string): string {
 // (e.g., examples/UniProt/100_uniprot_organelles_or_plasmids.ttl).
 function generateTurtle(input: {
   endpoint: string;
+  additionalEndpoints?: string[];
   slug: string;
   label: string;
   comment: string;
@@ -1117,8 +1148,20 @@ ex:${input.slug} a sh:SPARQLExecutable,
     rdfs:comment "${commentTtl}"^^rdf:HTML ;
 ${federatesLines}    sh:select """${query}""" ;
     schema:keywords ${keywords} ;
-    schema:target <${input.endpoint}> .
+    schema:target ${targets(input.endpoint, input.additionalEndpoints).join(' , ')} .
 `;
+}
+
+function targets(primary: string, extras?: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const url of [primary, ...(extras ?? [])]) {
+    const u = url.trim();
+    if (!u || seen.has(u)) continue;
+    seen.add(u);
+    out.push(`<${u}>`);
+  }
+  return out;
 }
 
 function extractServiceIris(query: string): string[] {

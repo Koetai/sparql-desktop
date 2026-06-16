@@ -38,6 +38,13 @@ export function SubmissionForm({ session }: Props) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [endpoint, setEndpoint] = useState(EXAMPLE_ENDPOINT);
+  // Extra endpoints the contributor knows the query also runs against.
+  // The primary `endpoint` is used for the Test query gate and YASGUI's
+  // request config; the full set is recorded on the issue and ends up as
+  // multiple schema:target IRIs when the curator publishes.
+  const [additionalEndpoints, setAdditionalEndpoints] = useState<string[]>([]);
+  const [addingEndpoint, setAddingEndpoint] = useState(false);
+  const [pendingAdditional, setPendingAdditional] = useState('');
   const [query, setQuery] = useState(EXAMPLE_QUERY);
   const [keywordsText, setKeywordsText] = useState('');
 
@@ -153,6 +160,9 @@ export function SubmissionForm({ session }: Props) {
         title: title.trim(),
         description: effectiveDescription,
         endpoint: endpoint.trim(),
+        additionalEndpoints: additionalEndpoints
+          .map((e) => e.trim())
+          .filter(Boolean),
         query,
         keywords,
         prefixes,
@@ -269,6 +279,9 @@ export function SubmissionForm({ session }: Props) {
             setKeywordsText('');
             setNaturalLanguageDescription('');
             setOriginalAiQuery('');
+            setAdditionalEndpoints([]);
+            setAddingEndpoint(false);
+            setPendingAdditional('');
             setTestResult(null);
           }}
         >
@@ -387,7 +400,7 @@ export function SubmissionForm({ session }: Props) {
       )}
 
       <div className="field">
-        <label htmlFor="endpoint">SPARQL endpoint</label>
+        <label htmlFor="endpoint">SPARQL endpoint (primary)</label>
         <EndpointPicker
           value={endpoint}
           onChange={(url) => {
@@ -395,6 +408,80 @@ export function SubmissionForm({ session }: Props) {
             invalidateTest();
           }}
         />
+      </div>
+
+      <div className="field">
+        <label>Also runs on (optional)</label>
+        <p className="hint">
+          If the same query is valid against other endpoints, list them here —
+          they'll all be recorded as <code>schema:target</code> on the
+          published example. Test query uses the primary above.
+        </p>
+        {additionalEndpoints.length > 0 && (
+          <ul className="endpoint-chips">
+            {additionalEndpoints.map((url) => (
+              <li key={url} className="endpoint-chip">
+                <code>{url}</code>
+                <button
+                  type="button"
+                  className="chip-remove"
+                  aria-label={`Remove ${url}`}
+                  onClick={() =>
+                    setAdditionalEndpoints((cur) => cur.filter((u) => u !== url))
+                  }
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {addingEndpoint ? (
+          <div className="add-endpoint-row">
+            <EndpointPicker
+              inputId="additional-endpoint"
+              value={pendingAdditional}
+              onChange={setPendingAdditional}
+            />
+            <div className="field-actions">
+              <button
+                type="button"
+                className="secondary"
+                disabled={
+                  !pendingAdditional.trim() ||
+                  pendingAdditional.trim() === endpoint ||
+                  additionalEndpoints.includes(pendingAdditional.trim())
+                }
+                onClick={() => {
+                  const next = pendingAdditional.trim();
+                  setAdditionalEndpoints((cur) => [...cur, next]);
+                  setPendingAdditional('');
+                  setAddingEndpoint(false);
+                }}
+              >
+                Add
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => {
+                  setPendingAdditional('');
+                  setAddingEndpoint(false);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => setAddingEndpoint(true)}
+          >
+            + Add another endpoint
+          </button>
+        )}
       </div>
 
       {mode === 'request' && (

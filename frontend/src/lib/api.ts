@@ -10,6 +10,9 @@ export interface SubmissionPayload {
   title: string;
   description: string;
   endpoint: string;
+  // Extra endpoints the query is also valid against. Recorded on the issue
+  // and published as additional schema:target IRIs.
+  additionalEndpoints?: string[];
   query: string;
   keywords: string[];
   prefixes: Record<string, string>;
@@ -111,6 +114,7 @@ export interface ParsedIssue {
   contributorName?: string;
   affiliation?: string;
   endpoint?: string;
+  additionalEndpoints?: string[];
   description?: string;
   query?: string;
   keywords: string[];
@@ -127,6 +131,7 @@ export interface PublishPayload {
   label: string;
   comment: string;
   endpoint: string;
+  additionalEndpoints?: string[];
   query: string;
   keywords: string[];
   sequenceNumber?: number;
