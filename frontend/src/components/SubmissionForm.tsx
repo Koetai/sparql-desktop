@@ -112,6 +112,16 @@ export function SubmissionForm({ session }: Props) {
     !!naturalLanguageDescription.trim() &&
     resolvedModel().length > 0;
 
+  // "Escalate to expert" — only offered in WORKING mode when the test has
+  // actually failed (timeout, server error, malformed query, …). Sends the
+  // contributor's draft + the test error as a needs-expert request, without
+  // requiring the LLM provenance fields that AI-assisted requests need.
+  const canEscalateFromWorking =
+    mode === 'working' &&
+    baseRequirementsMet &&
+    !!query.trim() &&
+    !!testError;
+
   function resolvedModel(): string {
     return aiModel === 'Other' ? aiModelOther.trim() : aiModel;
   }
@@ -155,6 +165,12 @@ export function SubmissionForm({ session }: Props) {
       const effectiveDescription = fromRequest
         ? naturalLanguageDescription.trim()
         : description.trim();
+      // Append a runtime keyword so the published example records how long
+      // the query took when the contributor tested it. Only attached when a
+      // successful test result is present (submit-as-working path).
+      const keywordsForSubmit = testResult
+        ? [...keywords, `runtime:${testResult.durationMs}ms`]
+        : keywords;
       const result = await submitQuery(session.accessToken, {
         mode: submitMode,
         title: title.trim(),
@@ -163,8 +179,12 @@ export function SubmissionForm({ session }: Props) {
         additionalEndpoints: additionalEndpoints
           .map((e) => e.trim())
           .filter(Boolean),
+        testError:
+          submitMode === 'request' && !fromRequest && testError
+            ? testError
+            : undefined,
         query,
-        keywords,
+        keywords: keywordsForSubmit,
         prefixes,
         selectedAffiliationId: affiliationId,
         aiSuggested: aiActive,
@@ -526,6 +546,12 @@ export function SubmissionForm({ session }: Props) {
                   {' '}· via proxy
                 </span>
               )}
+              <span
+                className="proxy-tag"
+                title="The runtime will be attached to the submission as a `runtime:Xms` keyword."
+              >
+                {' '}· adds <code>runtime:{testResult.durationMs}ms</code>
+              </span>
             </span>
           )}
           {testError && <span className="test-error">{testError}</span>}
@@ -607,13 +633,26 @@ export function SubmissionForm({ session }: Props) {
 
       <div className="submit-row">
         {mode === 'working' ? (
-          <button
-            type="submit"
-            className="primary"
-            disabled={!canSubmitWorking}
-          >
-            {submitting ? 'Submitting…' : 'Submit to koetai/sparql-examples'}
-          </button>
+          <>
+            <button
+              type="submit"
+              className="primary"
+              disabled={!canSubmitWorking}
+            >
+              {submitting ? 'Submitting…' : 'Submit to koetai/sparql-examples'}
+            </button>
+            {canEscalateFromWorking && (
+              <button
+                type="button"
+                className="secondary"
+                disabled={submitting}
+                onClick={() => handleSubmit('request')}
+                title="The test query failed. Submit this query for expert review — the error message will be attached."
+              >
+                {submitting ? 'Submitting…' : 'Submit for expert curation'}
+              </button>
+            )}
+          </>
         ) : (
           <>
             <button

@@ -13,6 +13,9 @@ export interface SubmissionPayload {
   // Extra endpoints the query is also valid against. Recorded on the issue
   // and published as additional schema:target IRIs.
   additionalEndpoints?: string[];
+  // Error message from a failed Test query, captured when a working-mode
+  // submission is escalated to needs-expert (e.g. the query timed out).
+  testError?: string;
   query: string;
   keywords: string[];
   prefixes: Record<string, string>;

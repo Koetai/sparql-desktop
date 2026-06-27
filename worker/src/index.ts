@@ -33,6 +33,10 @@ interface SubmissionBody {
   // body and emitted as additional schema:target IRIs when the curator
   // publishes the example.
   additionalEndpoints?: string[];
+  // Error message from the contributor's failed test query, if any.
+  // Captured when a working-mode submission is escalated to needs-expert
+  // because the test timed out or otherwise failed.
+  testError?: string;
   query: string;
   keywords: string[];
   prefixes: Record<string, string>;
@@ -344,18 +348,24 @@ async function handleSubmit(req: Request, env: Env, cors: HeadersInit): Promise<
       return text('Missing required fields: title, endpoint, query', 400, cors);
     }
   } else {
-    // request mode — natural-language description is the primary content;
-    // the query may be empty or partial. Endpoint is still required so an
-    // expert knows where the eventual query should run.
-    if (!body.title || !body.endpoint || !body.naturalLanguageDescription?.trim()) {
+    // request mode — two distinct flavors:
+    //   1. AI-assisted request: NL description + LLM model are required;
+    //      query is the (possibly failing) LLM draft.
+    //   2. Failed-test escalation: contributor wrote a query that didn't pass
+    //      the test gate (e.g. timeout). NL/model are optional; the query
+    //      and (optionally) testError carry the context for the expert.
+    if (!body.title || !body.endpoint) {
+      return text('Missing required fields for a request: title, endpoint', 400, cors);
+    }
+    if (!body.naturalLanguageDescription?.trim() && !body.query?.trim()) {
       return text(
-        'Missing required fields for a request: title, endpoint, natural-language description',
+        'Provide either a natural-language description or a query draft for the expert',
         400,
         cors,
       );
     }
-    if (!body.aiModel?.trim()) {
-      return text('Request mode requires the LLM model name', 400, cors);
+    if (body.aiSuggested && !body.aiModel?.trim()) {
+      return text('AI-assisted requests require the LLM model name', 400, cors);
     }
   }
 
@@ -415,9 +425,12 @@ function renderIssueBody(
   const lines: string[] = [];
 
   if (mode === 'request') {
+    const aiAssistedRequest = !!body.aiSuggested;
     lines.push(
       '> ⚠️ This is a **request for an expert** to write or fix the SPARQL query.',
-      '> The contributor described what they want in natural language and (optionally) provides an LLM-generated draft that did not yet work.',
+      aiAssistedRequest
+        ? '> The contributor described what they want in natural language and (optionally) provides an LLM-generated draft that did not yet work.'
+        : '> The contributor wrote a query that did not pass the test gate — typically a timeout or a server error. An expert is needed to optimise or fix it.',
       '',
     );
   }
@@ -449,28 +462,48 @@ function renderIssueBody(
   }
 
   if (mode === 'request') {
+    const aiAssistedRequest = !!body.aiSuggested;
+    const intent =
+      body.naturalLanguageDescription?.trim() || body.description?.trim();
     lines.push(
       '',
-      '## What the contributor wants to ask',
-      body.naturalLanguageDescription || '_(none provided)_',
+      '## What the contributor wants',
+      intent || '_(none provided)_',
     );
-    if (body.aiModel) {
+    if (body.testError?.trim()) {
+      const quoted = body.testError
+        .trim()
+        .split('\n')
+        .map((l) => '> ' + l)
+        .join('\n');
       lines.push(
         '',
-        '## LLM tried',
-        `**Model:** ${body.aiModel}`,
+        '## Test outcome',
+        'The contributor ran the query before escalating; the test failed with:',
+        '',
+        quoted,
       );
+    }
+    if (aiAssistedRequest && body.aiModel) {
+      lines.push('', '## LLM tried', `**Model:** ${body.aiModel}`);
     }
     if (body.query?.trim()) {
       lines.push(
         '',
-        '### LLM-generated draft (not yet working)',
+        '### ' +
+          (aiAssistedRequest
+            ? 'LLM-generated draft (not yet working)'
+            : 'Contributor draft (test failed)'),
         '```sparql',
         body.query,
         '```',
       );
     } else {
-      lines.push('', '### LLM-generated draft', '_(none — contributor asked for help without an attempt)_');
+      lines.push(
+        '',
+        '### Draft',
+        '_(none — contributor asked for help without an attempt)_',
+      );
     }
   } else {
     lines.push(
