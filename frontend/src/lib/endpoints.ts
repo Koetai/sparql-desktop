@@ -6,6 +6,7 @@ import type { EndpointInfo } from './api';
 // CORS still work — runQuery transparently falls back to the Worker proxy.
 export const CURATED_ENDPOINTS: EndpointInfo[] = [
   { name: 'Wikidata (QLever)', url: 'https://qlever.dev/api/wikidata' },
+  { name: 'GBIF (QLever)', url: 'https://qlever.dev/api/gbif' },
   // IDR (OMERO) QLever mirror. HTTP-only, so queries route through the Worker
   // proxy. The /qlever/sparql/ path is the SPARQL API; /qlever/idr is the UI.
   { name: 'IDR Münster (QLever)', url: 'http://idr-sparql.uni-muenster.de/qlever/sparql/' },
